@@ -78,9 +78,70 @@ st.markdown(
         background-color: #FFFFFF !important;
         border: 1px solid #E8DFD0 !important;
         border-radius: 8px !important;
+        color: #4A2812 !important;
     }
-    
-    section[data-testid="stSidebar"] { background: linear-gradient(180deg, #F5E9D3 0%, #EFE1CB 100%); }
+    /* =========================================================================
+   CUSTOM SIDEBAR STYLING (FIX TAMPILAN GELAP & KONTRAS TEKS)
+   ========================================================================= */
+/* 1. Mengubah background utama sidebar menjadi abu-abu gelap kebiruan */
+section[data-testid="stSidebar"] { 
+    background: #242731 !important; 
+}
+
+/* 2. Memaksa semua elemen teks bawaan, markdown, label, dan caption agar berwarna putih terang */
+section[data-testid="stSidebar"] .stMarkdown, 
+section[data-testid="stSidebar"] label, 
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { 
+    color: #FFFFFF !important; 
+}
+
+/* 3. FIX: Mengubah background tombol menjadi putih dan teksnya menjadi hitam */
+section[data-testid="stSidebar"] button {
+    background-color: #FFFFFF !important; /* Mengubah background tombol jadi putih */
+    border: 1px solid #E8DFD0 !important; /* Memberikan border halus seperti dropdown */
+    border-radius: 8px !important;       /* Membuat sudut melengkung sama seperti dropdown */
+}
+
+section[data-testid="stSidebar"] button p,
+section[data-testid="stSidebar"] button span {
+    color: #111111 !important;           /* Mengubah warna teks menjadi hitam/gelap */
+    font-weight: 700 !important;
+}
+}
+/* 4. FIX GARIS TEPI & SCROLLBAR COKELAT */
+/* Menghilangkan atau menyamarkan garis batas vertikal di kanan sidebar */
+section[data-testid="stSidebar"] + div, 
+[data-testid="stSidebarCollapseByDragTarget"] {
+    background-color: rgba(0, 0, 0, 0.1) !important; /* Mengubah garis cokelat vertikal menjadi abu-abu transparan halus */
+    border-right: none !important;
+}
+
+/* Mengubah warna atau menyembunyikan scrollbar cokelat di sidebar */
+section[data-testid="stSidebar"] .st-emotion-cache-16ids93, /* Selektor kontainer internal Streamlit */
+section[data-testid="stSidebar"] > div:first-child {
+    scrollbar-width: thin; /* Membuat scrollbar lebih tipis (Firefox) */
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent; /* Mengubah batang scroll jadi abu-abu transparan (Firefox) */
+}
+
+/* Khusus browser Chrome, Edge, dan Safari (Webkit) */
+section[data-testid="stSidebar"] ::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+}
+section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2) !important; /* Mengubah warna kotak scrollbar cokelat menjadi abu-abu tipis */
+    border-radius: 10px !important;
+}
+section[data-testid="stSidebar"] ::-webkit-scrollbar-track {
+    background: transparent !important; /* Menghilangkan background track scrollbar */
+}
+
+/* Garis pembatas horizontal (st.divider) di dalam menu dibuat tipis */
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+}
     #MainMenu, footer { visibility: hidden; }
 </style>
 """,
