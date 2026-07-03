@@ -72,11 +72,19 @@ st.markdown(
     .metric-nums { margin-top: 0.3rem; color: #6B4E3A; font-size: 0.8rem; display: flex; justify-content: space-between; }
     .stDownloadButton button { background: linear-gradient(135deg, #5F2C17, #9B4526) !important; color: #FBF5E8 !important; border: none !important; font-weight: 700 !important; }
     .stDownloadButton button:hover { background: linear-gradient(135deg, #4A2812, #7A2500) !important; }
+    
+    /* Style Tambahan untuk Selectbox "Pilih metric" */
+    .stSelectbox > div > div {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E8DFD0 !important;
+        border-radius: 8px !important;
+    }
+    
     section[data-testid="stSidebar"] { background: linear-gradient(180deg, #F5E9D3 0%, #EFE1CB 100%); }
     #MainMenu, footer { visibility: hidden; }
 </style>
 """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
 # =========================================================================
@@ -561,45 +569,62 @@ def _resolve_metric(label: str) -> tuple[str, str, str]:
 
 
 # =========================================================================
-# TOP ROW
+# PRA-HITUNG: CHART PNG & PDF LENGKAP (dipakai lintas tab)
 # =========================================================================
-top_left, top_right = st.columns([2, 1], gap="large")
+safe_name = selected_month.replace(" ", "_").replace("/", "-").lower()
 
-with top_left:
-    with st.container(border=True):
-        st.markdown(f'<div class="sec-title">🖼️ Preview Infografis — {selected_month}</div>', unsafe_allow_html=True)
-        st.image(img_template, use_container_width=True)
+png_template = image_to_png_bytes(img_template)
+pdf_template_only = image_to_pdf_bytes(img_template)
 
-with top_right:
-    with st.container(border=True):
-        st.markdown('<div class="sec-title">📊 KPI Utama Bulan Ini</div>', unsafe_allow_html=True)
-        for mk, mlabel, munit, _ in METRICS_TOP[:3]:
-            real = formatted.get(f"{mk}_realisasi", "-")
-            tgt  = formatted.get(f"{mk}_target", "-")
-            st.markdown(
-                f"""
-<div class="kpi-mini">
-    <div class="kpi-label">{mlabel} <span style="text-transform:none;color:#A6836E;">({munit})</span></div>
-    <div class="kpi-val">{real}</div>
-    <div class="kpi-tgt">Target: <strong>{tgt}</strong></div>
-</div>
-""", unsafe_allow_html=True)
+ranking_mk, ranking_lbl, ranking_unit = _resolve_metric(st.session_state.ranking_metric)
+trend_mk, trend_lbl, trend_unit = _resolve_metric(st.session_state.trend_metric)
 
+fig_h = build_heatmap(df, selected_month, bg=CHART_BG)
+heat_png = figure_to_png_bytes(fig_h)
+plt.close(fig_h)
+
+fig_r = build_ranking_bar(df, ranking_mk, ranking_lbl, ranking_unit, bg=CHART_BG)
+rank_png = figure_to_png_bytes(fig_r)
+plt.close(fig_r)
+
+fig_a = build_aset_horizontal(df, bg=CHART_BG)
+aset_png = figure_to_png_bytes(fig_a)
+plt.close(fig_a)
+
+fig_t = build_area_trend(df, trend_mk, trend_lbl, trend_unit, bg=CHART_BG)
+trend_png = figure_to_png_bytes(fig_t)
+plt.close(fig_t)
+
+# Page 1 pakai preferensi fill; page 2-5 selalu pakai margin cream
+pages_a4 = [
+    fit_to_a4(img_template, fill=infografis_full_page),
+    fit_to_a4(bytes_to_pil(heat_png)),
+    fit_to_a4(bytes_to_pil(rank_png)),
+    fit_to_a4(bytes_to_pil(aset_png)),
+    fit_to_a4(bytes_to_pil(trend_png)),
+]
+pdf_buf = io.BytesIO()
+pages_a4[0].save(pdf_buf, format="PDF", save_all=True,
+                 append_images=pages_a4[1:], resolution=200.0)
+pdf_lengkap_bytes = pdf_buf.getvalue()
+
+
+# =========================================================================
+# PANEL UNDUH (dirender di setiap tab, key unik per tab via key_suffix)
+# =========================================================================
+def render_download_panel(key_suffix: str) -> None:
     with st.container(border=True):
         st.markdown('<div class="sec-title">⬇️ Unduh Utama</div>', unsafe_allow_html=True)
-        safe_name = selected_month.replace(" ", "_").replace("/", "-").lower()
 
-        png_template = image_to_png_bytes(img_template)
         st.download_button(
             "Export PNG Infografis 🖼️",
             data=png_template,
             file_name=f"outlook_infografis_{safe_name}.png",
             mime="image/png",
             use_container_width=True,
+            key=f"dl_png_tpl_{key_suffix}",
         )
 
-          # PDF Infografis saja — native dimensions, quality tinggi
-        pdf_template_only = image_to_pdf_bytes(img_template)
         st.download_button(
             "📄 PDF Infografis (1 halaman)",
             data=pdf_template_only,
@@ -607,61 +632,77 @@ with top_right:
             mime="application/pdf",
             use_container_width=True,
             help="Hanya infografis dlm 1 halaman PDF, ukuran native template (300 DPI, quality maksimal).",
+            key=f"dl_pdf_tpl_{key_suffix}",
         )
 
-        ranking_mk, ranking_lbl, ranking_unit = _resolve_metric(st.session_state.ranking_metric)
-        trend_mk, trend_lbl, trend_unit = _resolve_metric(st.session_state.trend_metric)
-
-        fig_h = build_heatmap(df, selected_month, bg=CHART_BG)
-        fig_r = build_ranking_bar(df, ranking_mk, ranking_lbl, ranking_unit, bg=CHART_BG)
-        fig_a = build_aset_horizontal(df, bg=CHART_BG)
-        fig_t = build_area_trend(df, trend_mk, trend_lbl, trend_unit, bg=CHART_BG)
-
-        pil_h = bytes_to_pil(figure_to_png_bytes(fig_h))
-        pil_r = bytes_to_pil(figure_to_png_bytes(fig_r))
-        pil_a = bytes_to_pil(figure_to_png_bytes(fig_a))
-        pil_t = bytes_to_pil(figure_to_png_bytes(fig_t))
-        plt.close(fig_h); plt.close(fig_r); plt.close(fig_a); plt.close(fig_t)
-
-        # Page 1 pakai preferensi fill; page 2-5 selalu pakai margin cream
-        pages_a4 = [
-            fit_to_a4(img_template, fill=infografis_full_page),
-            fit_to_a4(pil_h),
-            fit_to_a4(pil_r),
-            fit_to_a4(pil_a),
-            fit_to_a4(pil_t),
-        ]
-        pdf_buf = io.BytesIO()
-        pages_a4[0].save(pdf_buf, format="PDF", save_all=True,
-                         append_images=pages_a4[1:], resolution=200.0)
-
         st.download_button(
-            " Lengkap (5 halaman A4) PDF📄",
-            data=pdf_buf.getvalue(),
+            "📄 Lengkap (5 halaman A4) PDF",
+            data=pdf_lengkap_bytes,
             file_name=f"outlook_lengkap_{safe_name}.pdf",
             mime="application/pdf",
             use_container_width=True,
             help=f"Page 1: infografis ({'full-page' if infografis_full_page else 'dgn margin cream'}). "
                  f"Page 2-5: 4 visualisasi dgn margin cream. Chart bg: {'putih' if chart_bg_white else 'cream'}.",
+            key=f"dl_pdf_full_{key_suffix}",
         )
 
+
 # =========================================================================
-# ROW 2: Target vs Realisasi
+# TABS
 # =========================================================================
-with st.container(border=True):
-    st.markdown('<div class="sec-title">🎯 Target vs Realisasi Bulan Ini</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="sec-sub">Hijau = tercapai. Oranye = belum tercapai. SAIDI/SAIFI/ENS/SUSUT: lebih rendah lebih baik.</div>',
-        unsafe_allow_html=True,
-    )
-    for mk, mlabel, munit, lower in METRICS_TOP:
-        tn = _num(values.get(f"{mk}_target"))
-        rn = _num(values.get(f"{mk}_realisasi"))
-        pct, color, bar_w = _achievement(tn, rn, lower)
-        pct_str = f"{pct:.0f}%" if pct is not None else "—"
-        arrow = "↓ lower-better" if lower else "↑ higher-better"
-        st.markdown(
-            f"""
+tab_preview, tab_target, tab_trend, tab_debug = st.tabs(
+    ["🖼️ Preview & Unduh", "🎯 Target vs Realisasi", "📈 Analisis Trend & Visualisasi", "🐞 Debug"]
+)
+
+# -------------------------------------------------------------------------
+# TAB 1 — Preview & Unduh
+# -------------------------------------------------------------------------
+with tab_preview:
+    col_left, col_right = st.columns([2, 1], gap="large")
+
+    with col_left:
+        with st.container(border=True):
+            st.markdown(f'<div class="sec-title">🖼️ Preview Infografis — {selected_month}</div>', unsafe_allow_html=True)
+            st.image(img_template, use_container_width=True)
+
+    with col_right:
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">📊 KPI Utama Bulan Ini</div>', unsafe_allow_html=True)
+            for mk, mlabel, munit, _ in METRICS_TOP[:3]:
+                real = formatted.get(f"{mk}_realisasi", "-")
+                tgt  = formatted.get(f"{mk}_target", "-")
+                st.markdown(
+                    f"""
+<div class="kpi-mini">
+    <div class="kpi-label">{mlabel} <span style="text-transform:none;color:#A6836E;">({munit})</span></div>
+    <div class="kpi-val">{real}</div>
+    <div class="kpi-tgt">Target: <strong>{tgt}</strong></div>
+</div>
+""", unsafe_allow_html=True)
+
+        render_download_panel("preview")
+
+# -------------------------------------------------------------------------
+# TAB 2 — Target vs Realisasi
+# -------------------------------------------------------------------------
+with tab_target:
+    col_left, col_right = st.columns([3, 1], gap="large")
+
+    with col_left:
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">🎯 Target vs Realisasi Bulan Ini</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sec-sub">Hijau = tercapai. Oranye = belum tercapai. SAIDI/SAIFI/ENS/SUSUT: lebih rendah lebih baik.</div>',
+                unsafe_allow_html=True,
+            )
+            for mk, mlabel, munit, lower in METRICS_TOP:
+                tn = _num(values.get(f"{mk}_target"))
+                rn = _num(values.get(f"{mk}_realisasi"))
+                pct, color, bar_w = _achievement(tn, rn, lower)
+                pct_str = f"{pct:.0f}%" if pct is not None else "—"
+                arrow = "↓ lower-better" if lower else "↑ higher-better"
+                st.markdown(
+                    f"""
 <div class="metric-row">
     <div class="metric-row-head">
         <div class="metric-name">{mlabel} <span style="color:#A6836E;font-weight:400;font-size:0.8rem;">· {munit} · {arrow}</span></div>
@@ -675,116 +716,104 @@ with st.container(border=True):
 </div>
 """, unsafe_allow_html=True)
 
-# =========================================================================
-# ROW 3: Heatmap
-# =========================================================================
-with st.container(border=True):
-    st.markdown('<div class="sec-title">🔥 Heatmap Achievement — 12 Bulan × 6 Metric</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sec-sub">Border coklat menyorot bulan aktif. Cell "—" berarti data belum ada.</div>',
-                unsafe_allow_html=True)
-    fig = build_heatmap(df, selected_month, bg=CHART_BG)
-    st.pyplot(fig, use_container_width=True)
-    heat_png = figure_to_png_bytes(fig)
-    plt.close(fig)
-    st.download_button(
-        "Export PNG chart ini (Heatmap)⬇️ ",
-        data=heat_png,
-        file_name=f"heatmap_achievement_{selected_month.split()[1]}.png",
-        mime="image/png",
-        key="dl_heatmap",
-    )
+    with col_right:
+        render_download_panel("target")
 
-# =========================================================================
-# ROW 4: Ranking Bulan
-# =========================================================================
-with st.container(border=True):
-    st.markdown('<div class="sec-title">📊 Ranking Bulan — Realisasi</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sec-sub">Urutan bulan dari realisasi tertinggi ke terendah untuk metric yg dipilih.</div>',
-                unsafe_allow_html=True)
+# -------------------------------------------------------------------------
+# TAB 3 — Analisis Trend (Heatmap, Ranking, Aset, Trend Area)
+# -------------------------------------------------------------------------
+with tab_trend:
+    col_left, col_right = st.columns([3, 1], gap="large")
 
-    ranking_metric_label = st.selectbox(
-        "Pilih metric",
-        [f"{lbl} ({unit})" for _, lbl, unit, _ in METRICS_TOP],
-        key="ranking_metric",
-    )
-    r_mk, r_lbl, r_unit = _resolve_metric(ranking_metric_label)
-    fig = build_ranking_bar(df, r_mk, r_lbl, r_unit, bg=CHART_BG)
-    st.pyplot(fig, use_container_width=True)
-    rank_png = figure_to_png_bytes(fig)
-    plt.close(fig)
-    st.download_button(
-        " Export PNG chart ini (Ranking)⬇️ ",
-        data=rank_png,
-        file_name=f"ranking_bulan_{r_mk}.png",
-        mime="image/png",
-        key="dl_ranking",
-    )
+    with col_left:
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">🔥 Heatmap Achievement — 12 Bulan × 6 Metric</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-sub">Border coklat menyorot bulan aktif. Cell "—" berarti data belum ada.</div>',
+                        unsafe_allow_html=True)
+            st.image(heat_png, use_container_width=True)
+            st.download_button(
+                "Export PNG chart ini (Heatmap)⬇️ ",
+                data=heat_png,
+                file_name=f"heatmap_achievement_{selected_month.split()[1]}.png",
+                mime="image/png",
+                key="dl_heatmap",
+            )
 
-# =========================================================================
-# ROW 5: Aset Horizontal
-# =========================================================================
-with st.container(border=True):
-    st.markdown('<div class="sec-title">🏗️ Pertumbuhan Aset Infrastruktur</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sec-sub">Growth % dari 2025 ke 2026 untuk 6 kategori aset.</div>',
-                unsafe_allow_html=True)
-    fig = build_aset_horizontal(df, bg=CHART_BG)
-    st.pyplot(fig, use_container_width=True)
-    aset_png = figure_to_png_bytes(fig)
-    plt.close(fig)
-    st.download_button(
-        "Export PNG chart ini(Aset)⬇️ ",
-        data=aset_png,
-        file_name="pertumbuhan_aset_2025_2026.png",
-        mime="image/png",
-        key="dl_aset",
-    )
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">📊 Ranking Bulan — Realisasi</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-sub">Urutan bulan dari realisasi tertinggi ke terendah untuk metric yg dipilih.</div>',
+                        unsafe_allow_html=True)
+            st.selectbox(
+                "Pilih metric",
+                [f"{lbl} ({unit})" for _, lbl, unit, _ in METRICS_TOP],
+                key="ranking_metric",
+            )
+            st.image(rank_png, use_container_width=True)
+            st.download_button(
+                " Export PNG chart ini (Ranking)⬇️ ",
+                data=rank_png,
+                file_name=f"ranking_bulan_{ranking_mk}.png",
+                mime="image/png",
+                key="dl_ranking",
+            )
 
-# =========================================================================
-# ROW 6: Trend Area + Peak
-# =========================================================================
-with st.container(border=True):
-    st.markdown('<div class="sec-title">📈 Trend Realisasi Bulanan — Puncak Highlighted</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sec-sub">Area = realisasi 2026 · Kuning putus2 = target · Abu titik2 = realisasi 2025.</div>',
-                unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">🏗️ Pertumbuhan Aset Infrastruktur</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-sub">Growth % dari 2025 ke 2026 untuk 6 kategori aset.</div>',
+                        unsafe_allow_html=True)
+            st.image(aset_png, use_container_width=True)
+            st.download_button(
+                "Export PNG chart ini(Aset)⬇️ ",
+                data=aset_png,
+                file_name="pertumbuhan_aset_2025_2026.png",
+                mime="image/png",
+                key="dl_aset",
+            )
 
-    trend_metric_label = st.selectbox(
-        "Pilih metric",
-        [f"{lbl} ({unit})" for _, lbl, unit, _ in METRICS_TOP],
-        key="trend_metric",
-    )
-    t_mk, t_lbl, t_unit = _resolve_metric(trend_metric_label)
-    fig = build_area_trend(df, t_mk, t_lbl, t_unit, bg=CHART_BG)
-    st.pyplot(fig, use_container_width=True)
-    trend_png = figure_to_png_bytes(fig)
-    plt.close(fig)
-    st.download_button(
-        "Export PNG chart ini(Trend)⬇️",
-        data=trend_png,
-        file_name=f"trend_area_{t_mk}.png",
-        mime="image/png",
-        key="dl_trend",
-    )
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">📈 Trend Realisasi Bulanan — Puncak Highlighted</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-sub">Area = realisasi 2026 · Kuning putus2 = target · Abu titik2 = realisasi 2025.</div>',
+                        unsafe_allow_html=True)
+            st.selectbox(
+                "Pilih metric",
+                [f"{lbl} ({unit})" for _, lbl, unit, _ in METRICS_TOP],
+                key="trend_metric",
+            )
+            st.image(trend_png, use_container_width=True)
+            st.download_button(
+                "Export PNG chart ini(Trend)⬇️",
+                data=trend_png,
+                file_name=f"trend_area_{trend_mk}.png",
+                mime="image/png",
+                key="dl_trend",
+            )
 
-# =========================================================================
-# ROW 7: Debug
-# =========================================================================
-col_a, col_b = st.columns(2)
+    with col_right:
+        render_download_panel("trend")
 
-with col_a:
-    with st.expander("📋 Semua Nilai Terbaca (raw dari sheet)"):
-        show_df = pd.DataFrame({
-            "Metric": list(formatted.keys()),
-            "Nilai (formatted)": list(formatted.values()),
-        })
-        st.dataframe(show_df, hide_index=True, use_container_width=True, height=420)
+# -------------------------------------------------------------------------
+# TAB 4 — Debug
+# -------------------------------------------------------------------------
+with tab_debug:
+    col_left, col_right = st.columns([3, 1], gap="large")
 
-with col_b:
-    with st.expander("ℹ️ Debug — kolom & bulan yg terbaca dari CSV"):
-        st.write(f"**Bulan terdeteksi ({len(available_months)}):**")
-        st.write(available_months)
-        st.write("**Kolom di CSV:**")
-        st.write(list(df.columns))
-        st.dataframe(df.head(15), use_container_width=True)
+    with col_left:
+        with st.expander("📋 Semua Nilai Terbaca (raw dari sheet)"):
+            show_df = pd.DataFrame({
+                "Metric": list(formatted.keys()),
+                "Nilai (formatted)": list(formatted.values()),
+            })
+            st.dataframe(show_df, hide_index=True, use_container_width=True, height=420)
+
+        with st.expander("ℹ️ Debug — kolom & bulan yg terbaca dari CSV"):
+            st.write(f"**Bulan terdeteksi ({len(available_months)}):**")
+            st.write(available_months)
+            st.write("**Kolom di CSV:**")
+            st.write(list(df.columns))
+            st.dataframe(df.head(15), use_container_width=True)
+
+    with col_right:
+        render_download_panel("debug")
 
 # =========================================================================
 # FOOTER
@@ -792,7 +821,7 @@ with col_b:
 st.markdown(
     """
 <div style="margin-top:2rem;padding:1rem;text-align:center;color:#8B6F5C;font-size:0.8rem;">
-    🌸 PLN UP3 Cilacap · Divisi Perencanaan & Kinerja · Powered by Streamlit + Pillow + Matplotlib
+    🌸 PLN UP3 Cilacap · Powered by Streamlit + Pillow + Matplotlib
 </div>
 """,
     unsafe_allow_html=True,
