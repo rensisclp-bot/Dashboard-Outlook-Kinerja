@@ -4,9 +4,8 @@
 # 1. SUMBER DATA
 # =========================================================================
 CSV_URL = (
-    "https://docs.google.com/spreadsheets/d/e/"
-    "2PACX-1vR--npmVy0Q37k0t6XdQCL29x8HHLfkrzvOa9rtkAGSWZJdBW7lTsKgF_SIbUS5tVxE_rHnuGnfpcdu"
-    "/pub?gid=563317953&single=true&output=csv"
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vQrQrjE62V_Eaq9g-00-hsrf-RxcGKQy9fEU1yJwa6-cG5lRGrRChsXb8sjV4NvcHU6l_zxrt_2ER-c/pub?gid=872183623&single=true&output=csv"
+  
 )
 
 SHEET_HEADER_ROW = 5
