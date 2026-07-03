@@ -598,6 +598,17 @@ with top_right:
             use_container_width=True,
         )
 
+          # PDF Infografis saja — native dimensions, quality tinggi
+        pdf_template_only = image_to_pdf_bytes(img_template)
+        st.download_button(
+            "📄 PDF Infografis (1 halaman)",
+            data=pdf_template_only,
+            file_name=f"outlook_infografis_{safe_name}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            help="Hanya infografis dlm 1 halaman PDF, ukuran native template (300 DPI, quality maksimal).",
+        )
+
         ranking_mk, ranking_lbl, ranking_unit = _resolve_metric(st.session_state.ranking_metric)
         trend_mk, trend_lbl, trend_unit = _resolve_metric(st.session_state.trend_metric)
 
