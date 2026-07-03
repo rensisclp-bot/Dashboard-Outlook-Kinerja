@@ -1,0 +1,6 @@
+streamlit>=1.39
+pandas>=2.2
+Pillow>=10.4
+requests>=2.32
+matplotlib>=3.8
+ 
