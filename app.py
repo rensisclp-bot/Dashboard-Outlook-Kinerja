@@ -200,7 +200,7 @@ with st.sidebar:
     st.markdown("### 🎨 Preferensi PDF")
     infografis_full_page = st.toggle(
         "Infografis full-page (tanpa margin cream)",
-        value=False,
+        value=True,
         help="Halaman 1 PDF: template edge-to-edge tanpa background cream. kalau mau infografis mandiri.",
     )
     chart_bg_white = st.toggle(
