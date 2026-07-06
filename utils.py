@@ -46,31 +46,37 @@ _VALID_MONTH_PREFIXES = {
 # AUTO-SHRINK FONT UNTUK ANGKA PANJANG
 # =========================================================================
 # Threshold panjang STRING (setelah format, termasuk pemisah titik/koma):
-# - ≤ 8 char: font default
-# - 9 char: -2
-# - 10 char: -4
-# - 11+ char: -6
-# Aturan berlaku HANYA untuk metric yg key-nya diakhiri "_target".
-# Kolom 2025 & realisasi tidak disentuh.
-_SHRINK_SUFFIX = "_target"
+# - ≤ 5 char: font default
+# - 6 char: -1
+# - 7 char: -3
+# - 8 char: -5
+# - 9 char: -6
+# - 10-12 char: -9
+# - 13+ char: -6 (fallback)
+#
+# Aturan berlaku ke SEMUA kolom (target, realisasi, 2025) berdasar PANJANG
+# TEKS, bukan lagi cuma kolom target. Alasan: base font size target &
+# realisasi di config.py itu SAMA (contoh P2TL sama-sama 22pt). Kalau cuma
+# target yg di-shrink, saat realisasi juga jadi panjang (kasus P2TL yg
+# angkanya besar di kedua kolom), hasilnya ukuran font beda padahal jumlah
+# digit sama -- keliatan nggak konsisten. Generalisasi ini aman utk metric
+# lain yg realisasinya pendek (default tidak berubah krn panjang < 5).
 _SHRINK_TABLE = [
- (5, 0),    # Panjang ≤ 5 (contoh: 0,24 / 6,58) -> Tetap Full Size
+    (5, 0),    # Panjang ≤ 5 (contoh: 0,24 / 6,58) -> Tetap Full Size
     (6, 1),    # Panjang 6 (contoh: 199,05 / 20,89 / 85,18) -> Turun tipis 1 poin
     (7, 3),    # Panjang 7 -> Turun 3 poin (Mulai persiapan mengecil)
     (8, 5),    # Panjang 8 -> Turun 5 poin
     (9, 6),    # Panjang 9 -> Turun 6 poin
-    (12, 9),   # Panjang 12 (Kasus P2TL kamu) -> Tetap Turun 9 poin supaya tidak nabrak
+    (12, 9),   # Panjang 12 (Kasus P2TL) -> Tetap Turun 9 poin supaya tidak nabrak
 ]
 
 def _adjust_font_size(text: str, base_size: int, key: str) -> int:
-    """Kembalikan font size disesuaikan panjang teks (khusus metric target)."""
-    if not key.endswith(_SHRINK_SUFFIX):
-        return base_size
+    """Kembalikan font size disesuaikan panjang teks (berlaku semua kolom)."""
     n = len(text)
     for max_len, reduction in _SHRINK_TABLE:
         if n <= max_len:
             return max(base_size - reduction, 10)
-    # Fallback: 11+ karakter
+    # Fallback: 13+ karakter
     return max(base_size - 6, 10)
 
 
