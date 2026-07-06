@@ -147,7 +147,6 @@ section[data-testid="stSidebar"] hr {
 """,
     unsafe_allow_html=True
 )
-
 # =========================================================================
 # HERO
 # =========================================================================
@@ -226,7 +225,111 @@ if row is None:
 else:
     values = extract_values(row)
 
+# ---- Parser & formatter Indonesia yg strict (dipakai override formatted) ----
+import math as _math
+
+def _parse_num_id(x):
+    """
+    Parse angka dari CSV Google Sheets. Auto-detect format US vs Indonesia:
+      "4.691,3"    -> 4691.3   (Indonesia: titik ribuan, koma desimal)
+      "4,691.3"    -> 4691.3   (US: koma ribuan, titik desimal)
+      "1.192.772"  -> 1192772  (Indonesia thousand)
+      "1,192,772"  -> 1192772  (US thousand)
+      "4691.3"     -> 4691.3   (raw US decimal)
+      "4691,3"     -> 4691.3   (raw Indonesia decimal)
+    """
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        try:
+            if _math.isnan(float(x)):
+                return None
+        except (TypeError, ValueError):
+            return None
+        return float(x)
+    s = str(x).strip()
+    if not s or s.lower() in {"nan", "none", "-"}:
+        return None
+
+    has_c = "," in s
+    has_d = "." in s
+
+    if has_c and has_d:
+        # Separator paling kanan = desimal
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")   # Indonesia
+        else:
+            s = s.replace(",", "")                      # US
+    elif has_c:
+        parts = s.split(",")
+        # Multi-koma atau 1 koma dgn 3 digit setelahnya -> thousand separator
+        if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit()):
+            s = s.replace(",", "")
+        else:
+            s = s.replace(",", ".")                     # Indonesia decimal
+    elif has_d:
+        parts = s.split(".")
+        # Multi-titik atau 1 titik dgn 3 digit setelahnya -> Indonesia thousand
+        if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit()):
+            s = s.replace(".", "")
+
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _fmt_id_strict(v, decimals):
+    """
+    Format ke konvensi Indonesia: titik ribuan, koma desimal, digit desimal fixed.
+    Contoh: 4691.3 dgn decimals=1 -> "4.691,3"
+            1192772 dgn decimals=0 -> "1.192.772"
+    """
+    parsed = _parse_num_id(v)
+    if parsed is None or _math.isnan(parsed):
+        return "-"
+    s = f"{parsed:,.{decimals}f}"
+    # US "1,234,567.89" -> Indonesia "1.234.567,89"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+# ---- Jumlah desimal per field: target & realisasi WAJIB sama, 2025 & 2026 sama ----
+DECIMAL_SPEC = {
+    # Metric utama — semua 2 desimal (Penjualan/SAIDI/SAIFI/ENS/Susut/P2TL)
+    "penjualan_target": 2, "penjualan_realisasi": 2, "penjualan_2025": 2,
+    "saidi_target":     2, "saidi_realisasi":     2, "saidi_2025":     2,
+    "saifi_target":     2, "saifi_realisasi":     2, "saifi_2025":     2,
+    "ens_target":       2, "ens_realisasi":       2, "ens_2025":       2,
+    "susut_target":     2, "susut_realisasi":     2, "susut_2025":     2,
+    "p2tl_target":      2, "p2tl_realisasi":      2, "p2tl_2025":      2,
+    # Aset — mengikuti template Mei: JTM/JTR 1 desimal, sisanya integer
+    "jtm_2025":       1, "jtm_2026":       1,
+    "jtr_2025":       1, "jtr_2026":       1,
+    "gardu_2025":     0, "gardu_2026":     0,
+    "penyulang_2025": 0, "penyulang_2026": 0,
+    "pelanggan_2025": 0, "pelanggan_2026": 0,
+    "daya_2025":      0, "daya_2026":      0,
+}
+
+
+def apply_strict_format(formatted_dict, raw_values):
+    """Override formatted dgn Indonesia format konsisten. Ambil raw dari values, format ulang."""
+    out = dict(formatted_dict)
+    for key, decimals in DECIMAL_SPEC.items():
+        raw = raw_values.get(key)
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        if not s or s.lower() in {"nan", "none", "-"}:
+            continue
+        result = _fmt_id_strict(raw, decimals)
+        if result != "-":
+            out[key] = result
+    return out
+
+
 formatted = format_all(values)
+formatted = apply_strict_format(formatted, values)   # <- override supaya konsisten
 month_short = selected_month.split()[0]
 formatted["month_display"] = MONTH_DISPLAY_ID.get(month_short, month_short)
 img_template = render_image(formatted)
@@ -289,6 +392,142 @@ def _fmt_num_id(v: float, decimals: int = 2) -> str:
         return "-"
     s = f"{v:,.{decimals}f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+# =========================================================================
+# KONVENSI POLARITAS PLN (sumber: sheet KINERJA UP3, NKO 2026)
+# Polaritas: 3 = Positif (naik = baik), 1 = Negatif (turun = baik),
+#            2 = Range (real dlm rentang target = baik)
+# Bobot: level UP3 (beda dgn ULP: SAIDI/SAIFI di ULP = 6, di UP3 = 5)
+# =========================================================================
+METRICS_PLN = {
+    # key        : (polaritas, bobot UP3)
+    "penjualan": (3, 14),
+    "saidi":     (1, 5),
+    "saifi":     (1, 5),
+    "ens":       (1, 2),
+    "susut":     (1, 12),
+    "p2tl":      (3, 3),
+}
+
+PLN_CAP = 110.0  # hard cap pencapaian sesuai konvensi NKO
+
+
+def _parse_range(target_str) -> tuple[float, float] | None:
+    """Parse target range string spt '95-100' -> (95.0, 100.0)."""
+    try:
+        parts = str(target_str).replace(",", ".").split("-")
+        if len(parts) == 2:
+            lo, hi = float(parts[0]), float(parts[1])
+            return (lo, hi) if lo <= hi else (hi, lo)
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _score_pln(target, real, polaritas):
+    """
+    Pencapaian sesuai konvensi NKO PLN (verified dari sheet KINERJA UP3):
+      Pol 3 (Positif): min(real/target x 100, 110)
+      Pol 1 (Negatif): min((2 - real/target) x 100, 110)
+      Pol 2 (Range):   real dlm rentang -> 110 (berdasar 1 sampel NKO;
+                       di luar rentang pakai jarak ke batas terdekat)
+    Return None kalau data tidak lengkap.
+    """
+    if real is None:
+        return None
+
+    if polaritas == 2:
+        rng = _parse_range(target)
+        if rng is None:
+            return None
+        lo, hi = rng
+        if lo <= real <= hi:
+            return PLN_CAP
+        # Di luar rentang: proporsional thd batas terdekat (asumsi, belum
+        # terverifikasi NKO -- baru 1 sampel polaritas 2 di file sumber)
+        edge = lo if real < lo else hi
+        if edge == 0:
+            return None
+        return max(0.0, min((1 - abs(real - edge) / edge) * 100, PLN_CAP))
+
+    t = _num(target) if not isinstance(target, (int, float)) else float(target)
+    if t is None or t == 0:
+        return None
+
+    if polaritas == 3:
+        raw = (real / t) * 100
+    elif polaritas == 1:
+        raw = (2 - real / t) * 100
+    else:
+        return None
+    return max(0.0, min(raw, PLN_CAP))
+
+
+def _nilai_pln(pencapaian, bobot):
+    """NILAI = min(Pencapaian, 100) x Bobot / 100. GAP = sisa ke bobot penuh."""
+    if pencapaian is None or bobot is None:
+        return None, None
+    nilai = min(pencapaian, 100.0) * bobot / 100.0
+    gap = max(0.0, 100.0 - pencapaian) * bobot / 100.0
+    return nilai, gap
+
+
+def build_pencapaian_pln_chart(rows: list[dict], month_label: str,
+                               bg: str = "#FFFFFF") -> plt.Figure:
+    """
+    Horizontal bar pencapaian per metric versi konvensi NKO PLN.
+    rows: list of dict {label, pencapaian, nilai, bobot, polaritas}
+    Garis referensi di 100% (target) dan 110% (cap NKO).
+    """
+    valid = [r for r in rows if r["pencapaian"] is not None]
+
+    fig, ax = plt.subplots(figsize=(12, 5.5), dpi=100)
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
+
+    if not valid:
+        ax.text(0.5, 0.5, "Belum ada data pencapaian", ha="center", va="center",
+                transform=ax.transAxes, color="#8B6F5C", fontsize=14)
+        ax.axis("off")
+        return fig
+
+    valid.sort(key=lambda r: r["pencapaian"])
+    labels = [r["label"] for r in valid]
+    pcts = [r["pencapaian"] for r in valid]
+    colors = ["#4A9D5B" if p >= 100 else "#E8A317" if p >= 90 else "#B84F28"
+              for p in pcts]
+
+    bars = ax.barh(labels, pcts, color=colors, edgecolor="#5F2C17",
+                   linewidth=0.6, height=0.62)
+
+    for bar, r in zip(bars, valid):
+        p = r["pencapaian"]
+        nilai_txt = (f"  {p:.2f}%  ·  Nilai {r['nilai']:.1f}/{r['bobot']}"
+                     if r["nilai"] is not None else f"  {p:.2f}%")
+        ax.text(bar.get_width() + 1.2, bar.get_y() + bar.get_height() / 2,
+                nilai_txt, va="center", fontweight="bold", fontsize=9.5,
+                color="#4A2812")
+
+    ax.axvline(100, color="#5F2C17", linestyle="--", linewidth=1.4, alpha=0.7)
+    ax.axvline(PLN_CAP, color="#B84F28", linestyle=":", linewidth=1.6, alpha=0.9)
+    ax.text(100, len(valid) - 0.28, " Target 100%", color="#5F2C17",
+            fontsize=8.5, fontweight="bold", va="bottom", ha="left", rotation=90)
+    ax.text(PLN_CAP, len(valid) - 0.28, f" Cap NKO {PLN_CAP:.0f}%", color="#B84F28",
+            fontsize=8.5, fontweight="bold", va="bottom", ha="left", rotation=90)
+
+    ax.set_title(f"Pencapaian KPI (Konvensi NKO PLN) — {month_label}",
+                 fontsize=14, fontweight="bold", color="#5F2C17", pad=14)
+    ax.set_xlabel("Pencapaian (%) — capped 110%", color="#4A2812", fontsize=11)
+    ax.tick_params(colors="#4A2812")
+    ax.set_xlim(0, 132)
+    ax.grid(True, axis="x", alpha=0.3, linestyle="--")
+    ax.set_axisbelow(True)
+    for sp in ax.spines.values():
+        sp.set_edgecolor("#E8DFD0")
+
+    plt.tight_layout()
+    return fig
 
 
 # =========================================================================
@@ -750,32 +989,95 @@ with tab_target:
     col_left, col_right = st.columns([3, 1], gap="large")
 
     with col_left:
+        # ---- hitung pencapaian PLN utk semua metric (dipakai bar + chart) ----
+        pln_rows = []
+        for mk, mlabel, munit, _lower in METRICS_TOP:
+            pol, bobot = METRICS_PLN[mk]
+            tn = _num(values.get(f"{mk}_target"))
+            rn = _num(values.get(f"{mk}_realisasi"))
+            raw_target = values.get(f"{mk}_target")  # utk polaritas 2 (range string)
+            pct = _score_pln(raw_target if pol == 2 else tn, rn, pol)
+            nilai, gap = _nilai_pln(pct, bobot)
+            pln_rows.append({
+                "key": mk, "label": mlabel, "unit": munit,
+                "polaritas": pol, "bobot": bobot,
+                "target": tn, "real": rn,
+                "pencapaian": pct, "nilai": nilai, "gap": gap,
+            })
+
         with st.container(border=True):
-            st.markdown('<div class="sec-title">🎯 Target vs Realisasi Bulan Ini</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-title">🎯 Target vs Realisasi — Konvensi NKO PLN</div>', unsafe_allow_html=True)
             st.markdown(
-                '<div class="sec-sub">Hijau = tercapai. Oranye = belum tercapai. SAIDI/SAIFI/ENS/SUSUT: lebih rendah lebih baik.</div>',
+                '<div class="sec-sub">Pencapaian dihitung sesuai polaritas NKO: '
+                'Pol 3 Positif = real/target · Pol 1 Negatif = (2 − real/target) · '
+                'semua di-cap 110%. Hijau ≥ 100% · Kuning 90–99% · Oranye &lt; 90%.</div>',
                 unsafe_allow_html=True,
             )
-            for mk, mlabel, munit, lower in METRICS_TOP:
-                tn = _num(values.get(f"{mk}_target"))
-                rn = _num(values.get(f"{mk}_realisasi"))
-                pct, color, bar_w = _achievement(tn, rn, lower)
-                pct_str = f"{pct:.0f}%" if pct is not None else "—"
-                arrow = "↓ lower-better" if lower else "↑ higher-better"
+            for r in pln_rows:
+                pct = r["pencapaian"]
+                if pct is None:
+                    color, pct_str, bar_w = "#A6836E", "—", 0.0
+                elif pct >= 100:
+                    color, pct_str, bar_w = "#4A9D5B", f"{pct:.2f}%", min(100.0, pct / 1.1)
+                elif pct >= 90:
+                    color, pct_str, bar_w = "#E8A317", f"{pct:.2f}%", pct / 1.1
+                else:
+                    color, pct_str, bar_w = "#B84F28", f"{pct:.2f}%", pct / 1.1
+
+                pol_badge = {3: "↑ Positif", 1: "↓ Negatif", 2: "⇅ Range"}[r["polaritas"]]
+                nilai_str = (f"Nilai: <strong>{r['nilai']:.2f}</strong> / {r['bobot']}"
+                             if r["nilai"] is not None else f"Bobot: {r['bobot']}")
+                capped_note = " · capped" if pct is not None and pct >= PLN_CAP else ""
+
                 st.markdown(
                     f"""
 <div class="metric-row">
     <div class="metric-row-head">
-        <div class="metric-name">{mlabel} <span style="color:#A6836E;font-weight:400;font-size:0.8rem;">· {munit} · {arrow}</span></div>
-        <div class="metric-pct" style="color:{color};">{pct_str}</div>
+        <div class="metric-name">{r['label']} <span style="color:#A6836E;font-weight:400;font-size:0.8rem;">· {r['unit']} · Pol {r['polaritas']} {pol_badge} · Bobot {r['bobot']}</span></div>
+        <div class="metric-pct" style="color:{color};">{pct_str}<span style="font-size:0.7rem;color:#A6836E;">{capped_note}</span></div>
     </div>
     <div class="bar-outer"><div class="bar-inner" style="width:{bar_w}%; background:{color};"></div></div>
     <div class="metric-nums">
-        <span>Target: <strong style="color:#4A2812;">{formatted.get(f"{mk}_target", "-")}</strong></span>
-        <span>Realisasi: <strong style="color:{color};">{formatted.get(f"{mk}_realisasi", "-")}</strong></span>
+        <span>Target: <strong style="color:#4A2812;">{formatted.get(f"{r['key']}_target", "-")}</strong></span>
+        <span>{nilai_str}</span>
+        <span>Realisasi: <strong style="color:{color};">{formatted.get(f"{r['key']}_realisasi", "-")}</strong></span>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+            # ---- ringkasan total nilai (6 KPI dashboard, bukan total NKO) ----
+            got = [r for r in pln_rows if r["nilai"] is not None]
+            if got:
+                tot_nilai = sum(r["nilai"] for r in got)
+                tot_bobot = sum(r["bobot"] for r in got)
+                st.markdown(
+                    f"""
+<div style="margin-top:0.5rem;padding:0.7rem 1rem;background:#F5E9D3;border-radius:10px;
+            border-left:4px solid #5F2C17;color:#4A2812;font-size:0.9rem;">
+    Total Nilai <strong>{tot_nilai:.2f}</strong> dari bobot <strong>{tot_bobot}</strong>
+    ({len(got)} KPI infografis — bukan total NKO penuh, NKO punya {100} bobot dgn KPI lain di luar dashboard ini)
+</div>
+""", unsafe_allow_html=True)
+
+        # ---- visualisasi pencapaian PLN ----
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">📊 Visualisasi Pencapaian — NKO PLN</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sec-sub">Garis putus2 coklat = target 100% · garis titik2 merah = cap NKO 110%. '
+                'Label kanan: pencapaian & nilai/bobot.</div>',
+                unsafe_allow_html=True,
+            )
+            fig_pln = build_pencapaian_pln_chart(pln_rows, selected_month, bg=CHART_BG)
+            pln_png = figure_to_png_bytes(fig_pln)
+            plt.close(fig_pln)
+            st.image(pln_png, use_container_width=True)
+            st.download_button(
+                "Export PNG chart ini (Pencapaian NKO)⬇️",
+                data=pln_png,
+                file_name=f"pencapaian_nko_{selected_month.replace(' ', '_').lower()}.png",
+                mime="image/png",
+                key="dl_pencapaian_pln",
+            )
 
     with col_right:
         render_download_panel("target")
