@@ -537,9 +537,56 @@ def build_pencapaian_pln_chart(rows: list[dict], month_label: str,
     return fig
 
 
-# =========================================================================
-# A4 CANVAS UTILITY
-# =========================================================================
+def build_radar_chart(rows: list[dict], month_label: str, bg: str = "#FFFFFF") -> plt.Figure:
+    """
+    Radar/spider chart pencapaian 6 KPI dlm 1 bentuk polygon.
+    Radial axis 0-110 (mengikuti cap NKO). Garis putus2 di 100 = target.
+    Bentuk penuh/bulat = performa bagus di semua metric.
+    Bentuk "penyok" ke dalam = ada metric yg belum tercapai.
+    """
+    labels = [r["label"] for r in rows]
+    # Missing data (None) ditampilkan sbg 0 -- lihat catatan di caption UI
+    values = [r["pencapaian"] if r["pencapaian"] is not None else 0 for r in rows]
+
+    n = len(labels)
+    angles = [i / n * 2 * 3.141592653589793 for i in range(n)]
+    angles += angles[:1]          # tutup polygon
+    values_closed = values + values[:1]
+
+    fig = plt.figure(figsize=(7, 7), dpi=100)
+    fig.patch.set_facecolor(bg)
+    ax = fig.add_subplot(111, polar=True)
+    ax.set_facecolor(bg)
+
+    ax.set_theta_offset(3.141592653589793 / 2)
+    ax.set_theta_direction(-1)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=11, color="#4A2812", fontweight="bold")
+
+    ax.set_ylim(0, 130)
+    ax.set_yticks([50, 100, 110])
+    ax.set_yticklabels(["50%", "100%", "110%"], fontsize=8, color="#8B6F5C")
+    ax.tick_params(axis="y", colors="#8B6F5C")
+
+    # Fill warna tergantung rata2 pencapaian (indikasi performa keseluruhan)
+    valid_vals = [v for v in values if v > 0]
+    avg = sum(valid_vals) / len(valid_vals) if valid_vals else 0
+    fill_color = "#4A9D5B" if avg >= 100 else "#E8A317" if avg >= 90 else "#B84F28"
+
+    ax.plot(angles, values_closed, color=fill_color, linewidth=2.2, marker="o", markersize=5)
+    ax.fill(angles, values_closed, color=fill_color, alpha=0.25)
+
+    # Garis referensi target 100% (lingkaran penuh)
+    target_ring = [100] * (n + 1)
+    ax.plot(angles, target_ring, color="#5F2C17", linestyle="--", linewidth=1.3, alpha=0.7)
+
+    ax.spines["polar"].set_color("#E8DFD0")
+    ax.grid(color="#E8DFD0", alpha=0.6)
+    ax.set_title(f"Bentuk Performa 6 KPI — {month_label}",
+                 fontsize=14, fontweight="bold", color="#5F2C17", pad=24)
+
+    plt.tight_layout()
+    return fig
 A4_W_PX = 1654   # 200 DPI × 8.27 inch
 A4_H_PX = 2339   # 200 DPI × 11.69 inch
 A4_MARGIN_BG = "#FBF5E8"  # cream margin around content
@@ -781,8 +828,18 @@ def build_aset_horizontal(_df: pd.DataFrame, bg: str = "#FFFFFF") -> plt.Figure:
 # =========================================================================
 # VIZ 4 — TREND AREA + PEAK
 # =========================================================================
+def _current_month_cutoff(selected_month: str) -> int:
+    """Index bulan terpilih di MONTH_ORDER. Dipakai buat potong trend chart
+    supaya bulan yg belum berjalan (biasanya 0 di sheet) tidak digambar."""
+    short = selected_month.split()[0]
+    try:
+        return MONTH_ORDER.index(short)
+    except ValueError:
+        return len(MONTH_ORDER) - 1
+
+
 def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit: str,
-                     bg: str = "#FFFFFF") -> plt.Figure:
+                     bg: str = "#FFFFFF", cutoff_idx: int | None = None) -> plt.Figure:
     col_real = COLUMN_MAP.get(f"{metric_key}_realisasi")
     col_tgt  = COLUMN_MAP.get(f"{metric_key}_target")
     col_25   = COLUMN_MAP.get(f"{metric_key}_2025")
@@ -795,6 +852,9 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
         parts = mv.split()
         if len(parts) != 2 or not parts[1].isdigit():
             continue
+        month_idx = MONTH_ORDER.index(parts[0]) if parts[0] in MONTH_ORDER else 999
+        if cutoff_idx is not None and month_idx > cutoff_idx:
+            continue   # skip bulan yg belum berjalan -- cegah garis jatuh ke 0
         data.append((parts[0], _num(r.get(col_real)), _num(r.get(col_tgt)), _num(r.get(col_25))))
 
     if not data:
@@ -802,6 +862,23 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
         fig.patch.set_facecolor(bg)
         ax.text(0.5, 0.5, "Belum ada data untuk metric ini", ha="center", va="center",
                 transform=ax.transAxes, color="#8B6F5C", fontsize=14)
+        ax.axis("off")
+        return fig
+
+    if len(data) < 2:
+        # Cuma 1 titik (misal bulan Jan) -- matplotlib nge-autoscale garis jadi
+        # sangat sempit & chart keliatan blank. Tampilkan pesan drpd chart kosong.
+        fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
+        fig.patch.set_facecolor(bg)
+        bulan_tunggal = data[0][0]
+        nilai_tunggal = data[0][1]
+        nilai_str = _fmt_num_id(nilai_tunggal, 2) if nilai_tunggal is not None else "-"
+        ax.text(0.5, 0.6, f"Trend butuh minimal 2 bulan data",
+                ha="center", va="center", transform=ax.transAxes,
+                color="#8B6F5C", fontsize=14, fontweight="bold")
+        ax.text(0.5, 0.4, f"Baru ada data {bulan_tunggal}: {nilai_str} {unit}",
+                ha="center", va="center", transform=ax.transAxes,
+                color="#A6836E", fontsize=11)
         ax.axis("off")
         return fig
 
@@ -860,9 +937,104 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
     return fig
 
 
-# =========================================================================
-# UI STATE
-# =========================================================================
+def build_pencapaian_trend(_df: pd.DataFrame, metric_key: str, metric_label: str,
+                           bg: str = "#FFFFFF", cutoff_idx: int | None = None) -> plt.Figure:
+    """
+    Trend Pencapaian % (konvensi NKO PLN) per bulan -- style sama spt
+    build_area_trend (area + garis target 100% + puncak), tapi sumbu Y
+    berupa persentase pencapaian, bukan nilai mentah.
+    """
+    col_real = COLUMN_MAP.get(f"{metric_key}_realisasi")
+    col_tgt  = COLUMN_MAP.get(f"{metric_key}_target")
+    pol, bobot = METRICS_PLN[metric_key]
+
+    data = []
+    for _, r in _df.iterrows():
+        mv = str(r.get(MONTH_COLUMN, "")).strip()
+        if not mv or " " not in mv:
+            continue
+        parts = mv.split()
+        if len(parts) != 2 or not parts[1].isdigit():
+            continue
+        month_idx = MONTH_ORDER.index(parts[0]) if parts[0] in MONTH_ORDER else 999
+        if cutoff_idx is not None and month_idx > cutoff_idx:
+            continue   # skip bulan yg belum berjalan -- cegah garis jatuh ke 0
+        tn = _num(r.get(col_tgt))
+        rn = _num(r.get(col_real))
+        pct = _score_pln(tn, rn, pol)
+        data.append((parts[0], pct))
+
+    if not data:
+        fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
+        fig.patch.set_facecolor(bg)
+        ax.text(0.5, 0.5, "Belum ada data untuk metric ini", ha="center", va="center",
+                transform=ax.transAxes, color="#8B6F5C", fontsize=14)
+        ax.axis("off")
+        return fig
+
+    if len(data) < 2:
+        fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
+        fig.patch.set_facecolor(bg)
+        bulan_tunggal = data[0][0]
+        pct_tunggal = data[0][1]
+        pct_str = f"{_fmt_id_strict(pct_tunggal, 2)}%" if pct_tunggal is not None else "-"
+        ax.text(0.5, 0.6, f"Trend butuh minimal 2 bulan data",
+                ha="center", va="center", transform=ax.transAxes,
+                color="#8B6F5C", fontsize=14, fontweight="bold")
+        ax.text(0.5, 0.4, f"Baru ada data {bulan_tunggal}: Pencapaian {pct_str}",
+                ha="center", va="center", transform=ax.transAxes,
+                color="#A6836E", fontsize=11)
+        ax.axis("off")
+        return fig
+
+    x = list(range(len(data)))
+    pct_vals = [d[1] for d in data]
+    labels = [d[0] for d in data]
+
+    fig, ax = plt.subplots(figsize=(14, 5.5), dpi=100)
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
+
+    pct_np = np.array(pct_vals, dtype=float)
+    if np.any(~np.isnan(pct_np)):
+        ax.fill_between(x, pct_np, alpha=0.35, color="#B84F28", label="Pencapaian NKO")
+        ax.plot(x, pct_np, marker="o", linewidth=2.5, color="#7A2500",
+                markerfacecolor="#FBF5E8", markeredgecolor="#5F2C17", markersize=7, zorder=3)
+
+    # Garis referensi: target 100% & cap NKO 110%
+    ax.axhline(100, color="#5F2C17", linestyle="--", linewidth=1.6, alpha=0.8, label="Target 100%")
+    ax.axhline(PLN_CAP, color="#B84F28", linestyle=":", linewidth=1.4, alpha=0.7, label=f"Cap NKO {PLN_CAP:.0f}%")
+
+    valid = [(i, v) for i, v in enumerate(pct_vals) if v is not None]
+    if valid:
+        peak_i, peak_v = max(valid, key=lambda t: t[1])
+        peak_month = labels[peak_i]
+        text_offset = -2 if peak_i > len(x) * 0.7 else 1.5
+        ax.annotate(
+            f"Puncak: {peak_month}\n{_fmt_id_strict(peak_v, 2)}%",
+            xy=(peak_i, peak_v),
+            xytext=(peak_i + text_offset, peak_v),
+            arrowprops=dict(arrowstyle="->", color="#B84F28", lw=1.5),
+            color="#7A2500", fontweight="bold", fontsize=10,
+            ha="left" if text_offset > 0 else "right",
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, color="#4A2812")
+    ax.set_title(f"Trend Pencapaian {metric_label} (NKO) — 2026",
+                 fontsize=14, fontweight="bold", color="#5F2C17", pad=14)
+    ax.set_xlabel("Bulan", color="#4A2812", fontsize=11)
+    ax.set_ylabel("Pencapaian (%)", color="#4A2812", fontsize=11)
+    ax.tick_params(colors="#4A2812")
+    ax.grid(True, alpha=0.3, linestyle="--")
+    ax.set_axisbelow(True)
+    ax.set_ylim(0, 132)
+    for sp in ax.spines.values():
+        sp.set_edgecolor("#E8DFD0")
+    ax.legend(loc="upper left", frameon=True, facecolor=bg, edgecolor="#E8DFD0")
+
+    plt.tight_layout()
+    return fig
 if "ranking_metric" not in st.session_state:
     st.session_state.ranking_metric = "PENJUALAN (GWh)"
 if "trend_metric" not in st.session_state:
@@ -898,7 +1070,8 @@ fig_a = build_aset_horizontal(df, bg=CHART_BG)
 aset_png = figure_to_png_bytes(fig_a)
 plt.close(fig_a)
 
-fig_t = build_area_trend(df, trend_mk, trend_lbl, trend_unit, bg=CHART_BG)
+fig_t = build_area_trend(df, trend_mk, trend_lbl, trend_unit, bg=CHART_BG,
+                          cutoff_idx=_current_month_cutoff(selected_month))
 trend_png = figure_to_png_bytes(fig_t)
 plt.close(fig_t)
 
@@ -996,6 +1169,31 @@ with tab_target:
     col_left, col_right = st.columns([3, 1], gap="large")
 
     with col_left:
+        # ---- kotak penjelasan konsep Polaritas (buat SPV/pembaca awam) ----
+        with st.expander("ℹ️ Apa itu Polaritas? (klik untuk penjelasan)", expanded=False):
+            st.markdown(
+                """
+**Polaritas** menentukan arah "baik"-nya sebuah metric — apakah nilai naik itu bagus, atau justru nilai turun yg bagus.
+Konsep ini dipakai PLN di sistem NKO (Nilai Kinerja Organisasi) utk menghitung skor Pencapaian tiap KPI.
+
+| Polaritas | Arti | Formula Pencapaian | Contoh metric |
+|---|---|---|---|
+| **3 — Positif ↑** | Nilai naik = performa bagus | `real / target × 100` | Penjualan, P2TL |
+| **1 — Negatif ↓** | Nilai turun = performa bagus | `(2 − real/target) × 100` | SAIDI, SAIFI, ENS, Susut |
+| **2 — Range ⇅** | Nilai dlm rentang target = performa bagus | Real dlm rentang → 110% | Metric anggaran (RKAP) |
+
+**Kenapa SAIDI/SAIFI/ENS/Susut itu Polaritas Negatif?** Karena metric ini mengukur gangguan/kerugian — makin kecil
+durasi pemadaman (SAIDI), makin jarang pemadaman (SAIFI), makin sedikit energi tak tersalur (ENS), makin kecil
+susut jaringan — makin bagus performanya. Jadi "realisasi lebih rendah dari target" itu justru dianggap prestasi,
+bukan kekurangan.
+
+**Kenapa ada cap 110%?** Sistem NKO PLN membatasi skor pencapaian maksimal di 110%, supaya 1 metric yg
+overperform ekstrem tidak mendominasi skor total secara tidak proporsional dibanding metric lain.
+
+**Nilai & Bobot**: tiap metric punya Bobot (kontribusi ke skor total). Nilai yg didapat = `min(Pencapaian, 100%) × Bobot / 100`
+— jadi nilai tetap di-cap di bobot penuh meski Pencapaian tembus 110%, tapi excess itu tidak menambah nilai lebih jauh.
+""")
+
         # ---- hitung pencapaian PLN utk semua metric (dipakai bar + chart) ----
         pln_rows = []
         for mk, mlabel, munit, _lower in METRICS_TOP:
@@ -1084,6 +1282,56 @@ with tab_target:
                 file_name=f"pencapaian_nko_{selected_month.replace(' ', '_').lower()}.png",
                 mime="image/png",
                 key="dl_pencapaian_pln",
+            )
+
+        # ---- visualisasi radar — bentuk performa 6 KPI sekaligus ----
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">🕸️ Bentuk Performa 6 KPI — Radar</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sec-sub">Garis putus2 coklat = lingkaran target 100%. Bentuk bulat penuh = semua metric '
+                'tercapai. Bentuk "penyok" ke dalam = metric itu belum tercapai. Metric tanpa data ditampilkan di titik 0%.</div>',
+                unsafe_allow_html=True,
+            )
+            fig_radar = build_radar_chart(pln_rows, selected_month, bg=CHART_BG)
+            radar_png = figure_to_png_bytes(fig_radar)
+            plt.close(fig_radar)
+            st.image(radar_png, use_container_width=False, width=520)
+            st.download_button(
+                "Export PNG chart ini (Radar Performa)⬇️",
+                data=radar_png,
+                file_name=f"radar_performa_{selected_month.replace(' ', '_').lower()}.png",
+                mime="image/png",
+                key="dl_radar",
+            )
+
+        # ---- trend pencapaian NKO per metric across bulan berjalan ----
+        with st.container(border=True):
+            st.markdown('<div class="sec-title">📈 Trend Pencapaian NKO — Bulan Berjalan</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sec-sub">Area = pencapaian aktual · garis putus2 coklat = target 100% · '
+                'garis titik2 merah = cap NKO 110%. Hanya tampilkan bulan yg sudah berjalan '
+                f'(s.d. {selected_month}) supaya bulan yg belum ada data tidak menampilkan angka 0 palsu.</div>',
+                unsafe_allow_html=True,
+            )
+            pencapaian_trend_label = st.selectbox(
+                "Pilih metric",
+                [f"{lbl} ({unit})" for _, lbl, unit, _ in METRICS_TOP],
+                key="pencapaian_trend_metric",
+            )
+            pt_mk, pt_lbl, pt_unit = _resolve_metric(pencapaian_trend_label)
+            fig_pt = build_pencapaian_trend(
+                df, pt_mk, pt_lbl, bg=CHART_BG,
+                cutoff_idx=_current_month_cutoff(selected_month),
+            )
+            pt_png = figure_to_png_bytes(fig_pt)
+            plt.close(fig_pt)
+            st.image(pt_png, use_container_width=True)
+            st.download_button(
+                "Export PNG chart ini (Trend Pencapaian)⬇️",
+                data=pt_png,
+                file_name=f"trend_pencapaian_{pt_mk}.png",
+                mime="image/png",
+                key="dl_pencapaian_trend",
             )
 
     with col_right:
