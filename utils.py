@@ -66,7 +66,7 @@ _SHRINK_TABLE = [
     (6, 1),    # Panjang 6 (contoh: 199,05 / 20,89 / 85,18) -> Turun tipis 1 poin
     (7, 3),    # Panjang 7 -> Turun 3 poin (Mulai persiapan mengecil)
     (8, 5),    # Panjang 8 -> Turun 5 poin
-    (9, 6),    # Panjang 9 -> Turun 6 poin
+    (9, 5),    # Panjang 9 -> Turun 6 poin
     (12, 9),   # Panjang 12 (Kasus P2TL) -> Tetap Turun 9 poin supaya tidak nabrak
 ]
 
