@@ -54,14 +54,13 @@ _VALID_MONTH_PREFIXES = {
 # Kolom 2025 & realisasi tidak disentuh.
 _SHRINK_SUFFIX = "_target"
 _SHRINK_TABLE = [
-    (5, 0),    # Panjang ≤ 5 (contoh: 0,24 / 6,58) -> Tetap Full Size
+ (5, 0),    # Panjang ≤ 5 (contoh: 0,24 / 6,58) -> Tetap Full Size
     (6, 1),    # Panjang 6 (contoh: 199,05 / 20,89 / 85,18) -> Turun tipis 1 poin
     (7, 3),    # Panjang 7 -> Turun 3 poin (Mulai persiapan mengecil)
     (8, 5),    # Panjang 8 -> Turun 5 poin
     (9, 6),    # Panjang 9 -> Turun 6 poin
     (12, 9),   # Panjang 12 (Kasus P2TL kamu) -> Tetap Turun 9 poin supaya tidak nabrak
 ]
-
 
 def _adjust_font_size(text: str, base_size: int, key: str) -> int:
     """Kembalikan font size disesuaikan panjang teks (khusus metric target)."""
@@ -127,6 +126,10 @@ def fetch_sheet(cache_bust: bool = True) -> pd.DataFrame:
         io.StringIO(resp.text),
         header=SHEET_HEADER_ROW,
         skip_blank_lines=False,
+        dtype=str,   # <-- SEMUA kolom dipertahankan sbg string supaya
+                     # pandas tidak salah parse "4.691" sbg float 4.691.
+                     # Parsing angka dilakukan di formatter (format_id /
+                     # _fmt_id_strict) yg tahu konvensi Indonesia.
     )
     df.columns = [str(c).strip() for c in df.columns]
     df = df.dropna(how="all")
@@ -191,7 +194,40 @@ def format_id(value: Any, is_decimal: bool) -> str:
         s = str(value).strip()
         if s == "" or s.lower() in {"nan", "none", "-"}:
             return "-"
-        s_norm = s.replace(".", "").replace(",", ".") if "," in s else s
+
+        # ---- Auto-detect format US vs Indonesia ----
+        has_c = "," in s
+        has_d = "." in s
+        if has_c and has_d:
+            # Separator paling kanan = desimal
+            if s.rfind(",") > s.rfind("."):
+                s_norm = s.replace(".", "").replace(",", ".")   # Indonesia
+            else:
+                s_norm = s.replace(",", "")                      # US
+        elif has_c:
+            parts = s.split(",")
+            # Multi-koma / 1 koma dgn 3 digit setelahnya = US thousand
+            if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit()):
+                s_norm = s.replace(",", "")
+            else:
+                s_norm = s.replace(",", ".")                     # Indonesia decimal
+        elif has_d:
+            parts = s.split(".")
+            if len(parts) > 2:
+                s_norm = s.replace(".", "")   # multi-titik = Indonesia thousand
+            elif len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+                # Ambiguous: cek integer part length
+                # <= 3 digit -> Indonesia thousand ("4.691" -> 4691)
+                # >= 4 digit -> US decimal ("5337.188" -> 5337.188)
+                if parts[0].isdigit() and len(parts[0]) <= 3:
+                    s_norm = s.replace(".", "")
+                else:
+                    s_norm = s
+            else:
+                s_norm = s
+        else:
+            s_norm = s
+
         num = float(s_norm)
     except (ValueError, TypeError):
         return str(value)
