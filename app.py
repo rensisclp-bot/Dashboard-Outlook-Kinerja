@@ -315,7 +315,7 @@ DECIMAL_SPEC = {
     "gardu_2025":     0, "gardu_2026":     0,
     "penyulang_2025": 0, "penyulang_2026": 0,
     "pelanggan_2025": 0, "pelanggan_2026": 0,
-    "daya_2025":      0, "daya_2026":      0,
+    "daya_2025":      2, "daya_2026":      2,
 }
 
 
@@ -840,11 +840,18 @@ def _current_month_cutoff(selected_month: str) -> int:
 
 def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit: str,
                      bg: str = "#FFFFFF", cutoff_idx: int | None = None) -> plt.Figure:
+    """
+    Trend area+garis, sumbu-x SELALU 12 bulan penuh (Jan-Des) terlepas berapa
+    bulan yg sudah ada datanya. Bulan yg belum berjalan (> cutoff_idx) atau
+    yg row-nya tidak ada di sheet dibiarkan NaN -- matplotlib otomatis
+    memutus garis di situ, TIDAK digambar jatuh ke 0. Chart selalu full-width
+    krn domain sumbu-x tetap 12 kategori, tidak bergantung jumlah data.
+    """
     col_real = COLUMN_MAP.get(f"{metric_key}_realisasi")
     col_tgt  = COLUMN_MAP.get(f"{metric_key}_target")
     col_25   = COLUMN_MAP.get(f"{metric_key}_2025")
 
-    data = []
+    month_rows: dict[str, pd.Series] = {}
     for _, r in _df.iterrows():
         mv = str(r.get(MONTH_COLUMN, "")).strip()
         if not mv or " " not in mv:
@@ -852,41 +859,28 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
         parts = mv.split()
         if len(parts) != 2 or not parts[1].isdigit():
             continue
-        month_idx = MONTH_ORDER.index(parts[0]) if parts[0] in MONTH_ORDER else 999
-        if cutoff_idx is not None and month_idx > cutoff_idx:
-            continue   # skip bulan yg belum berjalan -- cegah garis jatuh ke 0
-        data.append((parts[0], _num(r.get(col_real)), _num(r.get(col_tgt)), _num(r.get(col_25))))
+        month_rows[parts[0]] = r
 
-    if not data:
+    x = list(range(len(MONTH_ORDER)))
+    labels = list(MONTH_ORDER)
+    real_vals, tgt_vals, r25_vals = [], [], []
+    for i, m in enumerate(MONTH_ORDER):
+        row = month_rows.get(m)
+        beyond_cutoff = cutoff_idx is not None and i > cutoff_idx
+        if row is None or beyond_cutoff:
+            real_vals.append(None); tgt_vals.append(None); r25_vals.append(None)
+        else:
+            real_vals.append(_num(row.get(col_real)))
+            tgt_vals.append(_num(row.get(col_tgt)))
+            r25_vals.append(_num(row.get(col_25)))
+
+    if all(v is None for v in real_vals) and all(v is None for v in tgt_vals):
         fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
         fig.patch.set_facecolor(bg)
         ax.text(0.5, 0.5, "Belum ada data untuk metric ini", ha="center", va="center",
                 transform=ax.transAxes, color="#8B6F5C", fontsize=14)
         ax.axis("off")
         return fig
-
-    if len(data) < 2:
-        # Cuma 1 titik (misal bulan Jan) -- matplotlib nge-autoscale garis jadi
-        # sangat sempit & chart keliatan blank. Tampilkan pesan drpd chart kosong.
-        fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
-        fig.patch.set_facecolor(bg)
-        bulan_tunggal = data[0][0]
-        nilai_tunggal = data[0][1]
-        nilai_str = _fmt_num_id(nilai_tunggal, 2) if nilai_tunggal is not None else "-"
-        ax.text(0.5, 0.6, f"Trend butuh minimal 2 bulan data",
-                ha="center", va="center", transform=ax.transAxes,
-                color="#8B6F5C", fontsize=14, fontweight="bold")
-        ax.text(0.5, 0.4, f"Baru ada data {bulan_tunggal}: {nilai_str} {unit}",
-                ha="center", va="center", transform=ax.transAxes,
-                color="#A6836E", fontsize=11)
-        ax.axis("off")
-        return fig
-
-    x = list(range(len(data)))
-    real_vals = [d[1] for d in data]
-    tgt_vals  = [d[2] for d in data]
-    r25_vals  = [d[3] for d in data]
-    labels = [d[0] for d in data]
 
     fig, ax = plt.subplots(figsize=(14, 5.5), dpi=100)
     fig.patch.set_facecolor(bg)
@@ -910,14 +904,17 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
     if valid:
         peak_i, peak_v = max(valid, key=lambda t: t[1])
         peak_month = labels[peak_i]
-        text_offset = -2 if peak_i > len(x) * 0.7 else 1.5
+        # Offset dlm PIXEL (bukan satuan data) -- supaya anotasi selalu nempel
+        # dekat titik puncak, tidak melebar keluar chart saat data cuma sedikit.
+        near_right_edge = peak_i > len(x) * 0.7
+        dx = -90 if near_right_edge else 25
         ax.annotate(
             f"Puncak: {peak_month}\n{_fmt_num_id(peak_v, 2)} {unit}",
             xy=(peak_i, peak_v),
-            xytext=(peak_i + text_offset, peak_v),
+            xytext=(dx, 18), textcoords="offset points",
             arrowprops=dict(arrowstyle="->", color="#B84F28", lw=1.5),
             color="#7A2500", fontweight="bold", fontsize=10,
-            ha="left" if text_offset > 0 else "right",
+            ha="left" if dx > 0 else "right",
         )
 
     ax.set_xticks(x)
@@ -931,7 +928,7 @@ def build_area_trend(_df: pd.DataFrame, metric_key: str, metric_label: str, unit
     ax.set_axisbelow(True)
     for sp in ax.spines.values():
         sp.set_edgecolor("#E8DFD0")
-    ax.legend(loc="upper left", frameon=True, facecolor=bg, edgecolor="#E8DFD0")
+    ax.legend(loc="upper right", frameon=True, facecolor=bg, edgecolor="#E8DFD0")
 
     plt.tight_layout()
     return fig
@@ -941,14 +938,15 @@ def build_pencapaian_trend(_df: pd.DataFrame, metric_key: str, metric_label: str
                            bg: str = "#FFFFFF", cutoff_idx: int | None = None) -> plt.Figure:
     """
     Trend Pencapaian % (konvensi NKO PLN) per bulan -- style sama spt
-    build_area_trend (area + garis target 100% + puncak), tapi sumbu Y
-    berupa persentase pencapaian, bukan nilai mentah.
+    build_area_trend: sumbu-x SELALU 12 bulan penuh, bulan yg belum jalan
+    dibiarkan NaN (bukan diskip / bukan diganti bar) supaya konsisten
+    dgn chart trend lainnya dan tidak collapse jadi bentuk lain.
     """
     col_real = COLUMN_MAP.get(f"{metric_key}_realisasi")
     col_tgt  = COLUMN_MAP.get(f"{metric_key}_target")
     pol, bobot = METRICS_PLN[metric_key]
 
-    data = []
+    month_rows: dict[str, pd.Series] = {}
     for _, r in _df.iterrows():
         mv = str(r.get(MONTH_COLUMN, "")).strip()
         if not mv or " " not in mv:
@@ -956,40 +954,28 @@ def build_pencapaian_trend(_df: pd.DataFrame, metric_key: str, metric_label: str
         parts = mv.split()
         if len(parts) != 2 or not parts[1].isdigit():
             continue
-        month_idx = MONTH_ORDER.index(parts[0]) if parts[0] in MONTH_ORDER else 999
-        if cutoff_idx is not None and month_idx > cutoff_idx:
-            continue   # skip bulan yg belum berjalan -- cegah garis jatuh ke 0
-        tn = _num(r.get(col_tgt))
-        rn = _num(r.get(col_real))
-        pct = _score_pln(tn, rn, pol)
-        data.append((parts[0], pct))
+        month_rows[parts[0]] = r
 
-    if not data:
+    x = list(range(len(MONTH_ORDER)))
+    labels = list(MONTH_ORDER)
+    pct_vals = []
+    for i, m in enumerate(MONTH_ORDER):
+        row = month_rows.get(m)
+        beyond_cutoff = cutoff_idx is not None and i > cutoff_idx
+        if row is None or beyond_cutoff:
+            pct_vals.append(None)
+        else:
+            tn = _num(row.get(col_tgt))
+            rn = _num(row.get(col_real))
+            pct_vals.append(_score_pln(tn, rn, pol))
+
+    if all(v is None for v in pct_vals):
         fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
         fig.patch.set_facecolor(bg)
         ax.text(0.5, 0.5, "Belum ada data untuk metric ini", ha="center", va="center",
                 transform=ax.transAxes, color="#8B6F5C", fontsize=14)
         ax.axis("off")
         return fig
-
-    if len(data) < 2:
-        fig, ax = plt.subplots(figsize=(14, 5), dpi=100)
-        fig.patch.set_facecolor(bg)
-        bulan_tunggal = data[0][0]
-        pct_tunggal = data[0][1]
-        pct_str = f"{_fmt_id_strict(pct_tunggal, 2)}%" if pct_tunggal is not None else "-"
-        ax.text(0.5, 0.6, f"Trend butuh minimal 2 bulan data",
-                ha="center", va="center", transform=ax.transAxes,
-                color="#8B6F5C", fontsize=14, fontweight="bold")
-        ax.text(0.5, 0.4, f"Baru ada data {bulan_tunggal}: Pencapaian {pct_str}",
-                ha="center", va="center", transform=ax.transAxes,
-                color="#A6836E", fontsize=11)
-        ax.axis("off")
-        return fig
-
-    x = list(range(len(data)))
-    pct_vals = [d[1] for d in data]
-    labels = [d[0] for d in data]
 
     fig, ax = plt.subplots(figsize=(14, 5.5), dpi=100)
     fig.patch.set_facecolor(bg)
@@ -1009,14 +995,16 @@ def build_pencapaian_trend(_df: pd.DataFrame, metric_key: str, metric_label: str
     if valid:
         peak_i, peak_v = max(valid, key=lambda t: t[1])
         peak_month = labels[peak_i]
-        text_offset = -2 if peak_i > len(x) * 0.7 else 1.5
+        # Offset dlm PIXEL (bukan satuan data) -- lihat penjelasan di build_area_trend
+        near_right_edge = peak_i > len(x) * 0.7
+        dx = -90 if near_right_edge else 25
         ax.annotate(
             f"Puncak: {peak_month}\n{_fmt_id_strict(peak_v, 2)}%",
             xy=(peak_i, peak_v),
-            xytext=(peak_i + text_offset, peak_v),
+            xytext=(dx, 18), textcoords="offset points",
             arrowprops=dict(arrowstyle="->", color="#B84F28", lw=1.5),
             color="#7A2500", fontweight="bold", fontsize=10,
-            ha="left" if text_offset > 0 else "right",
+            ha="left" if dx > 0 else "right",
         )
 
     ax.set_xticks(x)
@@ -1031,10 +1019,12 @@ def build_pencapaian_trend(_df: pd.DataFrame, metric_key: str, metric_label: str
     ax.set_ylim(0, 132)
     for sp in ax.spines.values():
         sp.set_edgecolor("#E8DFD0")
-    ax.legend(loc="upper left", frameon=True, facecolor=bg, edgecolor="#E8DFD0")
+    ax.legend(loc="upper right", frameon=True, facecolor=bg, edgecolor="#E8DFD0")
 
     plt.tight_layout()
     return fig
+
+
 if "ranking_metric" not in st.session_state:
     st.session_state.ranking_metric = "PENJUALAN (GWh)"
 if "trend_metric" not in st.session_state:
