@@ -54,12 +54,12 @@ _VALID_MONTH_PREFIXES = {
 # Kolom 2025 & realisasi tidak disentuh.
 _SHRINK_SUFFIX = "_target"
 _SHRINK_TABLE = [
-    (5, 0),    # panjang ≤ 5 → -0   (Hasil: 22)
-    (6, 1),    # panjang == 6 → -1  (Hasil: 21)
-    (7, 0),    # panjang == 7 → -0  (Hasil: 22)
-    (8, 2),    # panjang == 8 → -2  (Hasil: 20)  <-- Disesuaikan landai
-    (9, 5),    # panjang == 9 → -2  (Hasil: 20)  <-- Diubah ke -2 (Ini untuk format "X.XXX.XXX")
-    # 10+ → -10 (ditangani di fallback fungsi bawaanmu, Hasil: 12)
+    (5, 0),    # Panjang ≤ 5 (contoh: 0,24 / 6,58) -> Tetap Full Size
+    (6, 1),    # Panjang 6 (contoh: 199,05 / 20,89 / 85,18) -> Turun tipis 1 poin
+    (7, 3),    # Panjang 7 -> Turun 3 poin (Mulai persiapan mengecil)
+    (8, 5),    # Panjang 8 -> Turun 5 poin
+    (9, 6),    # Panjang 9 -> Turun 6 poin
+    (12, 9),   # Panjang 12 (Kasus P2TL kamu) -> Tetap Turun 9 poin supaya tidak nabrak
 ]
 
 
