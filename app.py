@@ -269,9 +269,16 @@ def _parse_num_id(x):
             s = s.replace(",", ".")                     # Indonesia decimal
     elif has_d:
         parts = s.split(".")
-        # Multi-titik atau 1 titik dgn 3 digit setelahnya -> Indonesia thousand
-        if len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit()):
+        # Multi-titik selalu Indonesia thousand
+        if len(parts) > 2:
             s = s.replace(".", "")
+        # 1 titik + 3 digit setelahnya = AMBIGUOUS US decimal vs Indonesia thousand
+        # Heuristik: cek integer part length
+        #   <= 3 digit  -> Indonesia thousand ("4.691" -> 4691, "10.232" -> 10232)
+        #   >= 4 digit  -> US decimal ("5337.188" -> 5337.188, kept as-is)
+        elif len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+            if parts[0].isdigit() and len(parts[0]) <= 3:
+                s = s.replace(".", "")
 
     try:
         return float(s)
@@ -503,8 +510,8 @@ def build_pencapaian_pln_chart(rows: list[dict], month_label: str,
 
     for bar, r in zip(bars, valid):
         p = r["pencapaian"]
-        nilai_txt = (f"  {p:.2f}%  ·  Nilai {r['nilai']:.1f}/{r['bobot']}"
-                     if r["nilai"] is not None else f"  {p:.2f}%")
+        nilai_txt = (f"  {_fmt_id_strict(p, 2)}%  ·  Nilai {_fmt_id_strict(r['nilai'], 1)}/{r['bobot']}"
+                     if r["nilai"] is not None else f"  {_fmt_id_strict(p, 2)}%")
         ax.text(bar.get_width() + 1.2, bar.get_y() + bar.get_height() / 2,
                 nilai_txt, va="center", fontweight="bold", fontsize=9.5,
                 color="#4A2812")
@@ -753,7 +760,7 @@ def build_aset_horizontal(_df: pd.DataFrame, bg: str = "#FFFFFF") -> plt.Figure:
     for bar, g, v25, v26 in zip(bars, growths, v25s, v26s):
         sign = "+" if g >= 0 else ""
         ax.text(bar.get_width() + xmax * 0.02, bar.get_y() + bar.get_height() / 2,
-                f"{sign}{g:.2f}%  ({_fmt_num_id(v25, 0)} → {_fmt_num_id(v26, 0)})",
+                f"{sign}{_fmt_id_strict(g, 2)}%  ({_fmt_num_id(v25, 0)} → {_fmt_num_id(v26, 0)})",
                 va="center", fontweight="bold", fontsize=9, color="#4A2812")
 
     ax.set_title("Pertumbuhan Aset Infrastruktur — 2025 → 2026",
@@ -1018,14 +1025,14 @@ with tab_target:
                 if pct is None:
                     color, pct_str, bar_w = "#A6836E", "—", 0.0
                 elif pct >= 100:
-                    color, pct_str, bar_w = "#4A9D5B", f"{pct:.2f}%", min(100.0, pct / 1.1)
+                    color, pct_str, bar_w = "#4A9D5B", f"{_fmt_id_strict(pct, 2)}%", min(100.0, pct / 1.1)
                 elif pct >= 90:
-                    color, pct_str, bar_w = "#E8A317", f"{pct:.2f}%", pct / 1.1
+                    color, pct_str, bar_w = "#E8A317", f"{_fmt_id_strict(pct, 2)}%", pct / 1.1
                 else:
-                    color, pct_str, bar_w = "#B84F28", f"{pct:.2f}%", pct / 1.1
+                    color, pct_str, bar_w = "#B84F28", f"{_fmt_id_strict(pct, 2)}%", pct / 1.1
 
                 pol_badge = {3: "↑ Positif", 1: "↓ Negatif", 2: "⇅ Range"}[r["polaritas"]]
-                nilai_str = (f"Nilai: <strong>{r['nilai']:.2f}</strong> / {r['bobot']}"
+                nilai_str = (f"Nilai: <strong>{_fmt_id_strict(r['nilai'], 2)}</strong> / {r['bobot']}"
                              if r["nilai"] is not None else f"Bobot: {r['bobot']}")
                 capped_note = " · capped" if pct is not None and pct >= PLN_CAP else ""
 
@@ -1054,7 +1061,7 @@ with tab_target:
                     f"""
 <div style="margin-top:0.5rem;padding:0.7rem 1rem;background:#F5E9D3;border-radius:10px;
             border-left:4px solid #5F2C17;color:#4A2812;font-size:0.9rem;">
-    Total Nilai <strong>{tot_nilai:.2f}</strong> dari bobot <strong>{tot_bobot}</strong>
+    Total Nilai <strong>{_fmt_id_strict(tot_nilai, 2)}</strong> dari bobot <strong>{tot_bobot}</strong>
     ({len(got)} KPI infografis — bukan total NKO penuh, NKO punya {100} bobot dgn KPI lain di luar dashboard ini)
 </div>
 """, unsafe_allow_html=True)
